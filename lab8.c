@@ -2,8 +2,11 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
+#include <semaphore.h>
 
-pthread_mutex_t mtx1, mtx2;
+int rc = 0;
+sem_t rsem, wsem;
 
 struct City{
 	
@@ -24,14 +27,19 @@ void* thread_W(void* arg){
 	
 	struct City *args = (struct City*)arg;
 	
-	for(int i = 0; i < 12; i++){
-		pthread_mutex_lock(&mtx1);
-		if(i == 6){
-			usleep(100000);
-		}		
-		buffer[i] = args->city[i];
-		pthread_mutex_unlock(&mtx2);
+	while(1){
+		sem_wait(&wsem);
+
+		for(int i = 0; i < 12; i++){
+			if(i == 6){
+				usleep(100000);
+			}		
+			buffer[i] = args->city[i];
+		}
+
+		sem_post(&wsem);
 		usleep(args->time);
+		
 	}
 	pthread_exit(NULL);
 }
@@ -39,9 +47,18 @@ void* thread_W(void* arg){
 void* thread_R(void* arg){
 
 	struct Number *args = (struct Number*)arg;
+	char copy[12];
+	int i = 0;
 	
-	for(int i = 0; i < 12; i++){
-		pthread_mutex_lock(&mtx2);
+	while(1){
+		
+		sem_wait(&rsem);
+		
+		rc += 1;
+		if(rc == 1){
+			sem_wait(&wsem);
+		}
+		sem_post(&rsem);
 		
 		switch(args->number){
 			case 1:
@@ -54,11 +71,19 @@ void* thread_R(void* arg){
 				printf("\033[%d;60H", i+1);
 				break;	
 		}
-		printf("%c", buffer[i]);
+		
+		strcpy(copy, buffer);
+		printf("%s\n", copy);
+		i++;
+		
+		sem_wait(&rsem);
+		rc -= 1;
+		if(rc == 0){
+			sem_post(&wsem);
+		}
+		sem_post(&rsem);
 		usleep(args->time);
-		pthread_mutex_unlock(&mtx1);
 	}
-	
 	
 	pthread_exit(NULL);
 }
@@ -68,8 +93,8 @@ int main(int argc, char** argv){
 
 	printf("\033[2J\n");
 	
-	pthread_mutex_init(&mtx1, NULL);
-	pthread_mutex_init(&mtx2, NULL);
+	sem_init(&wsem, 0, 1);
+	sem_init(&rsem, 0, 1);
 	
 	struct City first = { "Novosibirsk" };
 	struct City second = { "Semipalantink" };
@@ -88,7 +113,7 @@ int main(int argc, char** argv){
 		number1.time = number2.time = number3.time = atof(argv[2]) * 100;
 	}
 	else{
-		number1.time = number2.time = number3.time = 30000;
+		number1.time = number2.time = number3.time = 300;
 	}
 	
 	
@@ -100,17 +125,19 @@ int main(int argc, char** argv){
 	pthread_create(&threadR2, NULL, (void*)thread_R, &number2);
 	pthread_create(&threadR3, NULL, (void*)thread_R, &number3);
 	
-	for(int i = 0; i < 14; i++){
+	for(int i = 0; i < 20; i++){
 		printf("\n");
 		usleep(300000);
 	}
 
 	pthread_join(threadW1, NULL);
-	pthread_join(threadW2, NULL);
-	pthread_join(threadW3, NULL);
 	pthread_join(threadR1, NULL);
+	pthread_join(threadW2, NULL);
 	pthread_join(threadR2, NULL);
+	pthread_join(threadW3, NULL);
 	pthread_join(threadR3, NULL);
 	printf("\n");
+	sem_destroy(&wsem);
+	sem_destroy(&rsem);
 	return 0;
 }
